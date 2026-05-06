@@ -182,7 +182,7 @@ async function startModelFromInput(
     ctx.ui.setStatus(PROVIDER_ID, `mlx: running (${model})`);
     ctx.ui.setWidget("mlx-progress", undefined);
     ctx.ui.setWidget("mlx-preset-picker", undefined);
-    ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "success");
+    ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "info");
   } catch (e) {
     controls.stopSpinner();
     progress.errorStep(4, e instanceof Error ? e.message : String(e));
@@ -395,7 +395,7 @@ function asProviderModels(ids: string[]) {
     id,
     name: `${id} (Local)` ,
     reasoning: false,
-    input: ["text"] as const,
+    input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
     maxTokens: 8192,
@@ -479,7 +479,7 @@ export default async function (pi: ExtensionAPI) {
       try {
         ctx.ui.notify("Installing local MLX runtime...", "info");
         await ensureSetup(progress);
-        ctx.ui.notify("MLX runtime installed.", "success");
+        ctx.ui.notify("MLX runtime installed.", "info");
         ctx.ui.setWidget("mlx-progress", undefined);
       } catch (e) {
         progress.errorStep(3, e instanceof Error ? e.message : String(e));
