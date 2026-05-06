@@ -347,7 +347,8 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("mlx-init", {
     description: "Initialize local MLX runtime (python venv + mlx-lm)",
     handler: async (_args, ctx) => {
-      const progress = makeProgressController(ctx, "mlx-progress", "MLX setup progress", [
+      ctx.ui.setWidget("mlx-presets", undefined);
+      const progress = makeProgressController(ctx, "mlx-progress", "MLX init progress", [
         "Find compatible Python",
         "Create virtual environment",
         "Upgrade pip",
@@ -357,6 +358,7 @@ export default async function (pi: ExtensionAPI) {
         ctx.ui.notify("Installing local MLX runtime...", "info");
         await ensureSetup(progress);
         ctx.ui.notify("MLX runtime installed.", "success");
+        ctx.ui.setWidget("mlx-progress", undefined);
       } catch (e) {
         progress.errorStep(3, e instanceof Error ? e.message : String(e));
         ctx.ui.notify(`mlx-init failed: ${e instanceof Error ? e.message : String(e)}`, "error");
@@ -367,6 +369,7 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("mlx-start", {
     description: "Start local MLX server. Usage: /mlx-start [preset-key|hf-model-id]",
     handler: async (args, ctx) => {
+      ctx.ui.setWidget("mlx-presets", undefined);
       const selected = resolveModel(args);
       const model = selected.modelId;
       currentModel = model;
@@ -453,6 +456,7 @@ export default async function (pi: ExtensionAPI) {
 
         stopSpinner();
         ctx.ui.setStatus(PROVIDER_ID, `mlx: running (${model})`);
+        ctx.ui.setWidget("mlx-progress", undefined);
         ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "success");
       } catch (e) {
         stopSpinner();
@@ -472,6 +476,7 @@ export default async function (pi: ExtensionAPI) {
       }
       ctx.ui.setStatus(PROVIDER_ID, "mlx: stopped");
       ctx.ui.setWidget("mlx-progress", undefined);
+      ctx.ui.setWidget("mlx-presets", undefined);
       await registerProvider(pi, { includeFallback: false });
       ctx.ui.notify("MLX server stopped.", "info");
     },
@@ -480,14 +485,8 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("mlx-presets", {
     description: "List built-in model presets",
     handler: async (_args, ctx) => {
-      const lines = ["pi-mlx-models presets", ""];
-      for (const p of MODEL_PRESETS) {
-        lines.push(`• ${p.key}`);
-        lines.push(`  ${p.modelId}`);
-        lines.push(`  tags: ${p.tags.join(", ")}`);
-      }
-      ctx.ui.setWidget("mlx-presets", lines, { placement: "belowEditor" });
-      ctx.ui.notify("Tip: /mlx-start <preset-key> (example: /mlx-start qwen3_4b)", "info");
+      const summary = MODEL_PRESETS.map((p) => `${p.key} → ${p.modelId} [${p.tags.join(", ")}]`).join("\n");
+      ctx.ui.notify(`Presets:\n${summary}\n\nTip: /mlx-start <preset-key> (example: /mlx-start qwen3_4b)`, "info");
     },
   });
 
