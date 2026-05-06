@@ -1,6 +1,6 @@
 {
   "name": "pi-mlx-models",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local MLX model launcher extension for Pi",
   "type": "module",
   "main": "dist/index.js",
