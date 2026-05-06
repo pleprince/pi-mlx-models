@@ -469,7 +469,6 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("mlx-init", {
     description: "Initialize local MLX runtime (python venv + mlx-lm)",
     handler: async (_args, ctx) => {
-      ctx.ui.setWidget("mlx-presets", undefined);
       ctx.ui.setWidget("mlx-preset-picker", undefined);
       const progress = makeProgressController(ctx, "mlx-progress", "MLX init progress", [
         "Find compatible Python",
@@ -503,22 +502,10 @@ export default async function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.setWidget("mlx-presets", undefined);
       ctx.ui.setWidget("mlx-preset-picker", undefined);
       await startModelFromInput(pi, ctx, normalizedArgs, { startSpinner, stopSpinner });
     },
   });
-
-  for (const preset of MODEL_PRESETS) {
-    pi.registerCommand(`mlx-start-${preset.key}`, {
-      description: `Start preset ${preset.key} (${preset.tags.slice(0, 2).join(", ")})`,
-      handler: async (_args, ctx) => {
-        ctx.ui.setWidget("mlx-presets", undefined);
-        ctx.ui.setWidget("mlx-preset-picker", undefined);
-        await startModelFromInput(pi, ctx, preset.key, { startSpinner, stopSpinner });
-      },
-    });
-  }
 
   pi.registerCommand("mlx-stop", {
     description: "Stop local MLX server",
@@ -530,30 +517,9 @@ export default async function (pi: ExtensionAPI) {
       }
       ctx.ui.setStatus(PROVIDER_ID, "mlx: stopped");
       ctx.ui.setWidget("mlx-progress", undefined);
-      ctx.ui.setWidget("mlx-presets", undefined);
       ctx.ui.setWidget("mlx-preset-picker", undefined);
       await registerProvider(pi, { includeFallback: false });
       ctx.ui.notify("MLX server stopped.", "info");
-    },
-  });
-
-  pi.registerCommand("mlx-presets", {
-    description: "Open built-in model preset selector",
-    handler: async (_args, ctx) => {
-      const preset = await pickPreset(ctx);
-      if (!preset) {
-        ctx.ui.notify("Preset selection cancelled.", "info");
-        return;
-      }
-      await startModelFromInput(pi, ctx, preset.key, { startSpinner, stopSpinner });
-    },
-  });
-
-  pi.registerCommand("mlx-models", {
-    description: "Refresh pi-mlx-models models from running server",
-    handler: async (_args, ctx) => {
-      await registerProvider(pi, { includeFallback: true });
-      ctx.ui.notify("Refreshed pi-mlx-models models.", "success");
     },
   });
 
