@@ -53,6 +53,24 @@ Pi package manifest is defined in `package.json`:
 
 - `pi.extensions: ["dist/index.js"]`
 
+## Screenshots
+
+### Preset selector
+
+![Preset selector](./assets/preset-selector.png)
+
+### Startup progress
+
+![Startup progress](./assets/start-progress.png)
+
+### Commands
+
+![Commands](./assets/commands.png)
+
+### Model selection
+
+![Model selection](./assets/model-selection.png)
+
 ## License
 
 MIT

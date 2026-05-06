@@ -34,7 +34,8 @@
   "pi": {
     "extensions": [
       "dist/index.js"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/vmarinogg/pi-mlx-models/main/assets/preset-selector.png"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
