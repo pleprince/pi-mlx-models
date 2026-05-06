@@ -85,7 +85,15 @@ async function pickPreset(ctx: any): Promise<ModelPreset | undefined> {
   return MODEL_PRESETS[idx];
 }
 
-async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
+async function startModelFromInput(
+  pi: ExtensionAPI,
+  ctx: any,
+  args: string | undefined,
+  controls: {
+    startSpinner: (ctx: any, baseText: string, progress?: number, showElapsed?: boolean) => void;
+    stopSpinner: () => void;
+  },
+) {
   const selected = resolveModel(args);
   const model = selected.modelId;
   currentModel = model;
@@ -115,7 +123,7 @@ async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
       `Starting MLX server with ${model}${selected.preset ? ` (preset: ${selected.preset.key})` : ""}...`,
       "info",
     );
-    startSpinner(ctx, `Start MLX server process (${model})`);
+    controls.startSpinner(ctx, `Start MLX server process (${model})`);
     progress.activateStep(1, "Launching mlx_lm.server");
 
     serverProc = spawn(VENV_PYTHON, ["-m", "mlx_lm.server", "--model", model, "--host", HOST, "--port", String(PORT)], {
@@ -125,7 +133,7 @@ async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
 
     progress.doneStep(1, "Server process started");
     progress.activateStep(2, "Probing /v1/models");
-    startSpinner(ctx, "Wait for server health endpoint");
+    controls.startSpinner(ctx, "Wait for server health endpoint");
 
     serverProc.stderr?.on("data", (d) => {
       const text = d.toString();
@@ -135,21 +143,21 @@ async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
         const done = fetchMatch[3];
         const total = fetchMatch[4];
         progress.setStep(3, { state: "active", detail: `Downloading model files (${done}/${total})`, progress: pct });
-        startSpinner(ctx, `Download/load model (${done}/${total} files)`, pct);
+        controls.startSpinner(ctx, `Download/load model (${done}/${total} files)`, pct);
         return;
       }
       if (text.includes("Fetching") || text.includes("Downloading")) {
         progress.setStep(3, { state: "active", detail: "Downloading model files..." });
-        startSpinner(ctx, "Download/load model");
+        controls.startSpinner(ctx, "Download/load model");
         return;
       }
       if (text.toLowerCase().includes("starting") || text.includes("httpd")) {
-        startSpinner(ctx, `Start MLX server process (${model})`);
+        controls.startSpinner(ctx, `Start MLX server process (${model})`);
       }
     });
 
     serverProc.on("exit", () => {
-      stopSpinner();
+      controls.stopSpinner();
       serverProc = null;
       ctx.ui.setStatus(PROVIDER_ID, "mlx: stopped");
     });
@@ -158,10 +166,10 @@ async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
     progress.doneStep(2, "Server responded on /v1/models");
 
     progress.activateStep(3, "Loading model (first run may download GBs)");
-    startSpinner(ctx, "Download/load model");
+    controls.startSpinner(ctx, "Download/load model");
 
     progress.activateStep(4, "Running first lightweight completion");
-    startSpinner(ctx, "Warm up first inference", undefined, true);
+    controls.startSpinner(ctx, "Warm up first inference", undefined, true);
     await waitForInferenceReady(model);
     progress.doneStep(4, "Model is inference-ready");
     progress.doneStep(3, "Model loaded");
@@ -170,13 +178,13 @@ async function startModelFromInput(pi: ExtensionAPI, ctx: any, args?: string) {
     await registerProvider(pi, { includeFallback: true });
     progress.doneStep(5, "Provider ready");
 
-    stopSpinner();
+    controls.stopSpinner();
     ctx.ui.setStatus(PROVIDER_ID, `mlx: running (${model})`);
     ctx.ui.setWidget("mlx-progress", undefined);
     ctx.ui.setWidget("mlx-preset-picker", undefined);
     ctx.ui.notify("MLX server is ready for prompts. Use /model and pick pi-mlx-models/...", "success");
   } catch (e) {
-    stopSpinner();
+    controls.stopSpinner();
     progress.errorStep(4, e instanceof Error ? e.message : String(e));
     ctx.ui.notify(`mlx-start failed: ${e instanceof Error ? e.message : String(e)}`, "error");
   }
@@ -491,13 +499,13 @@ export default async function (pi: ExtensionAPI) {
           ctx.ui.notify("Preset selection cancelled.", "info");
           return;
         }
-        await startModelFromInput(pi, ctx, preset.key);
+        await startModelFromInput(pi, ctx, preset.key, { startSpinner, stopSpinner });
         return;
       }
 
       ctx.ui.setWidget("mlx-presets", undefined);
       ctx.ui.setWidget("mlx-preset-picker", undefined);
-      await startModelFromInput(pi, ctx, normalizedArgs);
+      await startModelFromInput(pi, ctx, normalizedArgs, { startSpinner, stopSpinner });
     },
   });
 
@@ -507,7 +515,7 @@ export default async function (pi: ExtensionAPI) {
       handler: async (_args, ctx) => {
         ctx.ui.setWidget("mlx-presets", undefined);
         ctx.ui.setWidget("mlx-preset-picker", undefined);
-        await startModelFromInput(pi, ctx, preset.key);
+        await startModelFromInput(pi, ctx, preset.key, { startSpinner, stopSpinner });
       },
     });
   }
@@ -537,7 +545,7 @@ export default async function (pi: ExtensionAPI) {
         ctx.ui.notify("Preset selection cancelled.", "info");
         return;
       }
-      await startModelFromInput(pi, ctx, preset.key);
+      await startModelFromInput(pi, ctx, preset.key, { startSpinner, stopSpinner });
     },
   });
 
