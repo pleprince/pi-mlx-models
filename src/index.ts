@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -8,9 +9,6 @@ const PORT = Number(process.env.PI_MLX_MODELS_PORT ?? 11434);
 const HOST = process.env.PI_MLX_MODELS_HOST ?? "127.0.0.1";
 const BASE_URL = process.env.PI_MLX_MODELS_BASE_URL ?? `http://${HOST}:${PORT}/v1`;
 const DEFAULT_MODEL = process.env.PI_MLX_MODELS_DEFAULT_MODEL ?? "mlx-community/Qwen3-4B-Instruct-2507-4bit";
-
-const PROVIDER_ID = "pi-mlx-models";
-const DATA_DIR = join(homedir(), ".pi", "agent", "pi-mlx-models");
 
 const MODEL_PRESETS = [
   {
@@ -41,9 +39,20 @@ const MODEL_PRESETS = [
 ] as const;
 
 type ModelPreset = (typeof MODEL_PRESETS)[number];
+
+const PROVIDER_ID = "pi-mlx-models";
+const DATA_DIR = join(homedir(), ".pi", "agent", "pi-mlx-models");
 const VENV_DIR = join(DATA_DIR, "venv");
 const VENV_PYTHON = join(VENV_DIR, "bin", "python3");
 const HF_HOME = join(DATA_DIR, "models");
+const USAGE_HISTORY_FILE = join(DATA_DIR, "usage-history.json");
+
+interface UsageRecord {
+  lastUsed: number;
+  count: number;
+}
+
+const usageHistory: Map<string, UsageRecord> = new Map();
 
 let serverProc: ChildProcess | null = null;
 let currentModel = DEFAULT_MODEL;
@@ -73,6 +82,114 @@ function resolveModel(input?: string): { modelId: string; preset?: ModelPreset }
   const preset = MODEL_PRESETS.find((p) => p.key === normalized || p.modelId === normalized);
   if (preset) return { modelId: preset.modelId, preset };
   return { modelId: normalized };
+}
+
+async function loadUsageHistory(): Promise<void> {
+  try {
+    if (!existsSync(USAGE_HISTORY_FILE)) return;
+    const raw = await readFile(USAGE_HISTORY_FILE, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, UsageRecord>;
+    for (const [key, record] of Object.entries(parsed)) {
+      usageHistory.set(key, record);
+    }
+  } catch (err) {
+    console.error("Failed to load usage history:", err);
+  }
+}
+
+async function saveUsageHistory(): Promise<void> {
+  try {
+    const obj: Record<string, UsageRecord> = {};
+    for (const [key, record] of usageHistory.entries()) {
+      obj[key] = record;
+    }
+    const tmp = `${USAGE_HISTORY_FILE}.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    await writeFile(tmp, JSON.stringify(obj, null, 2), "utf8");
+    await rename(tmp, USAGE_HISTORY_FILE);
+  } catch (err) {
+    console.error("Failed to save usage history:", err);
+    try {
+      const tmp = (err as NodeJS.ErrnoException)?.code === "ENOENT" ? undefined : USAGE_HISTORY_FILE;
+      if (tmp) await unlink(tmp).catch(() => {});
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+}
+
+async function recordModelUsage(modelId: string): Promise<void> {
+  const existing = usageHistory.get(modelId);
+  usageHistory.set(modelId, {
+    lastUsed: Date.now(),
+    count: (existing?.count ?? 0) + 1,
+  });
+  await saveUsageHistory();
+}
+
+function parseModelIdFromDir(name: string): string | null {
+  if (name.startsWith("models--")) {
+    return name.slice(8).replace(/--/g, "/");
+  }
+  return null;
+}
+
+function discoverDownloadedModels(): string[] {
+  const found: string[] = [];
+  try {
+    if (!existsSync(HF_HOME)) return found;
+    const scanRoots = [HF_HOME, join(HF_HOME, "hub")];
+    for (const root of scanRoots) {
+      if (!existsSync(root)) continue;
+      for (const entry of readdirSync(root)) {
+        const modelId = parseModelIdFromDir(entry);
+        if (modelId && !MODEL_PRESETS.some((p) => p.modelId === modelId) && !found.includes(modelId)) {
+          found.push(modelId);
+        }
+      }
+    }
+  } catch {
+    // ignore read errors
+  }
+  return found;
+}
+
+async function pickModel(ctx: any): Promise<string | undefined> {
+  const downloaded = discoverDownloadedModels();
+  const allItems: Array<{ key: string; label: string; sortKey: number }> = [];
+
+  for (const modelId of downloaded) {
+    const record = usageHistory.get(modelId);
+    const recency = record?.lastUsed ?? 0;
+    allItems.push({
+      key: modelId,
+      label: `downloaded: ${modelId}${record ? ` (used ${record.count}x, last: ${new Date(recency).toLocaleDateString()})` : " (never used)"}`,
+      sortKey: recency,
+    });
+  }
+
+  for (const preset of MODEL_PRESETS) {
+    const record = usageHistory.get(preset.modelId);
+    const recency = record?.lastUsed ?? 0;
+    allItems.push({
+      key: preset.modelId,
+      label: `preset: ${preset.key} — ${preset.tags.slice(0, 2).join(", ")}${record ? ` (used ${record.count}x, last: ${new Date(recency).toLocaleDateString()})` : ""}`,
+      sortKey: recency,
+    });
+  }
+
+  allItems.sort((a, b) => b.sortKey - a.sortKey);
+
+  if (allItems.length === 0) {
+    ctx.ui.notify("No downloaded models or presets available.", "info");
+    return undefined;
+  }
+
+  const options = allItems.map((item) => item.label);
+  const selected = await ctx.ui.select("Select MLX model (most recent first)", options);
+  if (!selected) return undefined;
+  const idx = options.indexOf(selected);
+  if (idx < 0) return undefined;
+  return allItems[idx].key;
 }
 
 async function pickPreset(ctx: any): Promise<ModelPreset | undefined> {
@@ -416,6 +533,7 @@ async function registerProvider(pi: ExtensionAPI, options?: { includeFallback?: 
 }
 
 export default async function (pi: ExtensionAPI) {
+  await loadUsageHistory();
   await registerProvider(pi, { includeFallback: false });
 
   function renderStatusBar() {
@@ -492,12 +610,13 @@ export default async function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const normalizedArgs = (args || "").trim();
       if (!normalizedArgs) {
-        const preset = await pickPreset(ctx);
-        if (!preset) {
-          ctx.ui.notify("Preset selection cancelled.", "info");
+        const modelId = await pickModel(ctx);
+        if (!modelId) {
+          ctx.ui.notify("Model selection cancelled.", "info");
           return;
         }
-        await startModelFromInput(pi, ctx, preset.key, { startSpinner, stopSpinner });
+        await recordModelUsage(modelId);
+        await startModelFromInput(pi, ctx, modelId, { startSpinner, stopSpinner });
         return;
       }
 
